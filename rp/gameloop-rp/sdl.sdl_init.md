@@ -11,10 +11,9 @@ int SDL_Init(Uint32 flags);
 ```
 
 ## 2. Function Parameters
-
+|        |                               |
 |--------|-------------------------------|
 | flags  | subsytem initialization flags |
-|--------|-------------------------------|
 
 ## 3. Return Value
 
