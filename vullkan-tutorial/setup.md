@@ -383,3 +383,158 @@ void cleanup() {
 3.
     1. Before continuing with the more complex steps after instance creation, it's time to evaluate our debugging options by checking out validation layers.
 
+# Validation layers
+
+## 1. What are validation layers?
+
+1.
+    1. The Vulkan API is designed around the idea of minimal driver overhead and one of the manifestations of that goal is that there is very limited error checking in the API by default.
+    2. Even mistakes as simple as setting enumerations to incorrect values or passing null pointers to required parameters are generally not explicitly handled and will simply result in crashes or undefined behavior.
+    3. Because Vulkan requires you to be very explicit about everything you're doing, it's easy to make many small mistakes like using a new GPU feature and forgetting to request it at logical device creation time.
+    
+2.
+    1. However, that doesn't mean that these checks can't be added to the API.
+    2. Vulkan introduces an elegant system for this known as *validation layers*.
+    3. Validation layers are optional components that hook into Vulkan function calls to apply additional operations.
+    4. Common operations in validation layers are:
+
+        1. Checking the values of parameters against the specification to detect misuse
+        2. Tracking creation and destruction of objects to find resource leaks
+        3. Checking thread safety by tracking the threads that calls originate from
+        4. Logging every call and its parameters to the standard output
+        5. Tracing Vulkan calls for profiling and replaying
+    
+3.
+    1. Here's an example of what the implementation of a function in a diagnostics layer could look like:
+
+```cpp
+VkResult vkCreateInstance(
+    const VkInstanceCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkInstance* instance
+)
+{
+    if (pCreateInfo == nullptr || instance == nullptr) {
+        log("Null pointer passed to required parameter");
+        return VK_ERROR_INTIALIZATION_FAILED;
+    }
+
+    return real_vkCreateInstance(pCreateInfo, pAllocator, instance);
+}
+```
+
+4.
+    1. These validation layers can be freely stacked to include all the debugging functionality that you're interested in.
+    3. You can simply enable validation layers for debug builds and completely disable them for release builds, which gives you the best of both worlds!
+
+5.
+    1. Vulkan does not come with any validation layers built-in, but the LunarG Vulkan SDK provides a nice set of layers that check for common errors.
+    2. They're also completely open source, so you can check which kind of mistakes they check for and contribute.
+    3. Using the validation layers is the best way to avoid your application breaking on different drivers by accidentally relying on undefine behavior.
+
+6.
+    1. Validation layers can only be used if they have been installed onto the system.
+    2. For example, the LunarG validation layers are only available on PCs with the Vulkan SDK installed.
+
+7.
+    1. There were formerly two different types of validation layers in Vulkan: isntance and device specific.
+    2. The idea was that instance layers would only check calls related to a specific GPU.
+    3. Device specific layers have now been deprecated, which means that instance validation layers apply to all Vulkan calls.
+    4. The specification document still recommends that you enable validation layers at device level as well for compatibility, which is required by some implementations.
+    5. We'll simply specify the same layers as the instance at logical device level, which we'll see later on.
+
+## 2. Using validation layers
+
+1.
+    1. In this section we'll see how to enable the standard diagnostics layers provided by the Vulkan SDK.
+    2. Just like extensions, validation layers need to be enabled by specifying their name.
+    3. All of the useful standard validation is bundled into a layer included in the SDK that is known as `VK_LAYER_KHRONOS_validation`.
+
+2.
+    1. Let's first add two configuration variables to the program to specify the layers to enable and whether to enable them or not.
+    2. I've chosen to base that value on whether the program is being compiled in debug mode or not.
+    3. The `NDEBUG` macro is part of the C++ standard and means "not debug".
+
+```cpp
+const uint32_t WIDTH = 800;
+const uint32_t HEIGHT = 600;
+
+const std::vector<const char*> validationLayers = {
+    "VK_LAYER_KHRONOS_validation"
+};
+
+#ifdef NDEBUG
+    const bool enableValidationLayers = false;
+#else
+    const bool enableValidationLayers = true;
+#endif
+```
+
+3.
+    1. We'll add a new function `checkValidationLayerSupport` that checks iuf all of the requested layers are available.
+    2. First list all of the available layers using the `vkEnumerateInstanceLayerProperties` function.
+    3. Its usage is identical to that of `vkEnumerateInstanceExtensionProperties` which was discussed in the instance creation chapter.
+
+```cpp
+bool checkValidationLayerSupport() {
+    uint32_t layerCount;
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+    std::vector<VkLayerProperties> availableLayers(layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+    return false;
+}
+```
+
+4.
+    1. Next, check if all the layers in `validationLayers` exist in the `availableLayers` list.
+    2. You may need to include `<cstring>` for `strcmp`.
+
+```cpp
+for (const char* layerName : validationLayers) {
+    bool layerFound = false;
+
+    for (const auto& layerProperties : availableLayers) {
+        if (strcmp(layerName, layerProperties.layerName) == 0) {
+            layerFound = true;
+            break;
+        }
+    }
+
+    if (!layerFound) {
+        return false;
+    }
+}
+
+return true;
+```
+
+5. We can now use this function in `createInstance`:
+
+```cpp
+void createInstance() {
+    if (enableValidationLayers && !checkValidationLayerSupport()) {
+        throw std::runtime_error("validation layers requested, but not available!");
+    }
+}
+```
+
+6.
+    1. Now run the program in debug mode and ensure that the error does not occur.
+    2. If it does, then have a look at the FAQ.
+
+7.
+    1. Finally, modify the `VkInstanceCreateInfo` struct instantiation to include the validation layer names if they are enabled:
+
+```cpp
+if (enableValidationLayers) {
+    createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+    createInfo.ppEnabledLayerNames = validationLayers.data();
+} else {
+    createInfo.enabledLayerCount = 0;
+}
+```
+
+8.
+    1. If the check was successful then `vkCreateInstance` should not ever return a `VK_ERROR_LAYER_NOT_PRESENT` error, but you should run the program to make sure.
